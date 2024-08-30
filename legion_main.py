@@ -1,4 +1,3 @@
-import legion_func as lf
 import math
 import os
 import json
@@ -10,19 +9,17 @@ from statistics import mode
 from random import randint
 #initialize modules and vars
 gm.init()
+a = gm.font.SysFont('sfnsmono',10)
 fps = 60
 clock = gm.time.Clock()
-#define sprites,background
-spritesheet = gm.image.load("./Graphics/spritesheet.png")
-with open("spritemap.json","r") as file:
-    images = json.load(file)
-for i in images:
-    surf = gm.Surface(images[i][1],gm.SRCALPHA)
-    surf.blit(spritesheet,(images[i][0][0]*-33,images[i][0][1]*-33))
-    surf = gm.transform.scale(surf,(images[i][1][0]*2,images[i][1][1]*2))
-    images[i] = surf
-#create sprites
+gm.display.set_caption("Legion")
+#EDIT SCREEN SIZE HERE
+size = [400,300]
+screen = gm.display.set_mode(size, vsync = 1)
+import legion_func as lf
+view = lf.ViewData(screen,10)
 
+#read in save files
 allsprites = []
 sizes = []
 backs = []
@@ -36,69 +33,36 @@ for i in os.listdir("maps"):
         data = lf.read_save("maps/" + i)
         allsprites[level] = lf.Collection(*data[0])
         sizes[level] = gm.Rect(0,0,data[1][0],data[1][1])
-        backs[level] = gm.image.load(f"./Graphics/{data[2]}.png")
+        backs[level] = gm.image.load(f"./Graphics/{data[2]}.xcf")
+        try:
+            allsprites[level]["0.0"]
+            num = level
+        except:
+            pass
 #data objects
-world = lf.WorldData(allsprites,sizes,backs)
-gm.display.set_caption("Legion")
-view = lf.ViewData(800,600)
+world = lf.WorldData(allsprites,sizes,backs,num = num)
 text = lf.Textdata()
 view.debug = True
-#view.hitbox = True
+#lf.simple("the world is quiet here you stranger fella",["q"],world,view)
 #main loop
 def main():
     debug = False
     objectfacing = None
     player = world.sprites["0.0"]
     tics = [player.vector.copy()]
-    while 1:
-        #Interaction
-        ys = []
-        xs = []
-        lst = []
-        l_interact = 18
-        w_interact = 20
+    running = True
+    while running:
+        #lf.slide(world,view,text,5,"0.0","0.0")
+        #update sprite object being looked at
         if objectfacing != None:
             objectfacing.change_sprite()
         objectfacing = None
-        rect = player.rect
-        #get starting point for interaction
-        if 0 in player.facing:
-            y1 = rect.y+ceil((1/2*(rect.height)*(player.facing.y+1)))-(player.facing.x*(w_interact-1))
-            x1 = rect.x+ceil((1/2*(rect.width)*(player.facing.x+1)))-(player.facing.y*(w_interact-1)/2)-(player.facing.y)*10
-        else:
-            y1 = rect.y+round((1/2*(rect.height-1)*(player.facing.y+1))) + (player.facing.y) * 10
-            x1 = rect.x+round((1/2*(rect.width-1)*(player.facing.x+1)))
-        for i in range(w_interact):
-            for j in range(1,l_interact):
-                filled = False
-                if 0 in player.facing:
-                    y = y1+2*(j*player.facing.y+i*player.facing.x)
-                    x = x1+2*(j*player.facing.x+i*player.facing.y)
-                else:
-                    y = y1+2*(((j%2)*j*player.facing.y)+(int(not(j%2))*(j-1)*player.facing.y)-i*player.facing.y)
-                    x = x1+2*(int(not(j%2))*j*player.facing.x)+((j%2)*(j-1)*player.facing.x)
-                if debug:
-                    view.screen.fill((255,255,255),rect=gm.Rect(x-view.rect.x+view.border,y-view.rect.y+view.border,1,1))
-                for k in world.sprites:
-                    for sprite in k:
-                        for box in sprite.hitbox:
-                            if box.collidepoint(x,y) and sprite != player:
-                                if not sprite.empty:
-                                    filled = True
-                                if sprite.interact:
-                                    lst.append(sprite)
-                                    filled = True
-                                    break
-                        if filled: break
-                    if filled: break 
-                if filled: break
-                   
-        #update sprite object being looked at
+        lst = lf.looking(world,view,False)
         if lst != []:
             objectfacing = mode(lst)
             objectfacing.change_sprite(color = [0,0,255,0])
-            text.add("Press k to interact",objectfacing.rect.x,objectfacing.rect.y-18,1,objectfacing,False,15)
-        
+            text.add("Press k to interact",objectfacing.rect.x,objectfacing.rect.y-18,2,objectfacing,view,
+                     False,15,True)
         #Event handling
         for event in gm.event.get():
             if event.type == gm.QUIT:
@@ -109,14 +73,21 @@ def main():
                     gm.display.flip()
                     sleep(0.5)
                 if (event.key == gm.K_SPACE and player.vector.magnitude() != 0 and not player.dodging and
-                not player.ragdoll):
+                    not player.ragdoll):
                     player.dodging = 30
                     player.ragdoll = 20
                     player.iframe = 20
                     player.speed *= 2
                 elif event.key == gm.K_k and objectfacing != None and not player.ragdoll:
-                    objectfacing.interaction(world,player,text)
+                    objectfacing.interaction(world,player,text,view)
                     objectfacing.change_sprite(color = [0,0,255,0])
+                elif event.key == gm.K_ESCAPE:
+                    if lf.pausegame(world, view) == "q":
+                        running = False
+                elif 49 <= event.key <= 49 + len(player.tools) - 1:
+                    player.hand = player.tools[event.key - 49]
+                elif event.key == gm.K_j:
+                    player.attack(world)
         #Get player vector
         keys = gm.key.get_pressed()
         if not player.ragdoll:
@@ -139,14 +110,13 @@ def main():
         if player.vector != [0,0] and not player.ragdoll:
             if (tics[-1] == tics[-2] == tics[-3]) or (tics[-1] != tics[-2]
                                                       and (tics[-2].y == 0 or tics[-2].x == 0)):
-                player.facing.x = player.vector.x
-                player.facing.y = player.vector.y
+                player.facing = player.vector.copy()
         #update all sprites
-        world.sprites.update(world,text)
+        world.sprites.update(world, text, view)
         if player.health <= 0:
             lf.death(world,view,text)
         #update text
-        text.update()
+        text.update(view,objectfacing)
         #remove sprites
         removing = []
         for group in world.sprites:
@@ -158,8 +128,10 @@ def main():
         #graphics
         lf.disp(world,view,text)
         gm.display.flip()
-        clock.tick(fps)
+        clock.tick(60)
         view.fps = clock.get_fps()
         
 if __name__ == '__main__':
-    main()
+    while 1:
+        main()
+        print("New game")

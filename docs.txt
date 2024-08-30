@@ -1,0 +1,45 @@
+Legion docs:
+
+
+Data structures:
+	There are three main data classes that are used: A worlddata, viewdata, and textdata object. They store game data, view data, and text data, respectively. There are also 2 custom classes for storing sprites: Group and Collection. 
+
+Sprite Group/Collection:
+	A Group is essentially a tricked out dictionary that holds sprites, with some special functions. Note: it is not a child class of Dict, but it does utilize a dict as its main attribute. A Collection is similar, but instead of holding a dictionary of sprites, it holds a dictionary of Groups. When collection object is made, you pass in any number of sprite objects. The collection class will automatically make Group objects and sort sprites into correct Group based on their sprite.tag attribute, which is a str containing a two numbers, separated by a period. Eg "0.0" or "7.13". The tag has two parts as mentioned previously. The first number tells which sprite class it is an instance of, and the second number distinguishes it from others of its class. Eg. The tag "0.0" indicates a pc object with the a secondary id of "0". The tag "7.13" indicates a mapdoor with a secondary tag of "13". The get_item function uses this to find specific sprites or groups. To call it, you just pass in the how tag, and the collection object parses it and return the correct sprite/group. Eg. Collection()["0.0"] would return the Pc object with tag "0.0". Colelction()["7"] woudl return the group object of id "7", which is map doors. In order to add more sprites, call the Collection.add() method, using the sprites being added as arguments. It will once again automatically sort the sprites into their correct group and at the correct index. Note: Do not add a sprite with the same id as another sprite, because it will replace the first one. 
+	The engine generally should not have to directly interact with the Group objects, most Group interaction should be handled through functions in the Collection object. Eg. Collection.update() calls Group.update() which then calls sprite.update(). Collection.add() also adds sprites to correct group with correct index based on their tag. However, when you want to obtain a specific group, for iteration or other purposes, use the get_item function, and pass in    the id of that group. Eg. Collection()["7"] would return the group object of id "7", which is map doors.
+	
+Worlddata:
+	The Worlddata class contains all the data necessary for the world. It has a sprites attribute which is a Collection object. It was a background attribute which is a pygame surface of the background image. It has a size attribute, which is the size of the map. It has a switches attribute, which is a list containing the state of all switches for that map (the mechanics of the switch system are explained in more detail under the switches/togglers section). Because Legion is built to utilize many different maps and switch between then to make a world, the Worlddata class also has an allsprites, allsizes, allbackgrounds, and allswitches attributes, which each are a list containing many different sprite collections, sizes, backgrounds, or switch lists, respectively. This sprites, size, background, and switches attributes essentially are references to the specific collection, size, background, or switch list that is active, based on which map the player is in. The active attributes/map can be changed via the switch method, which takes a number, telling which map to switch to, as an attribute. This number is simply an index for finding the new attributes to make active. Eg. Worlddata().switch(3), will set the worlddata object to map 3, via setting sprites, sizes, etc. to allsprites[3] and allsizes[3], etc, respectively. When making maps/levels, keep this in mind especially when making mapdoor objects, as they need a map destination attribute which tells which map to change to. The Worlddata class also has an attribute, classtype, which is a list containing a reference to each sprite class, in ascending order of tag, so classtype[int(num)] will return the class that is associated with the primary tag that is equal to num.
+
+Textdata:
+
+
+Viewdata:
+
+
+Centering algorithm:
+
+
+Game loop and design:
+
+
+Looking func for interaction:
+
+
+Attack:
+
+
+Read/write save:
+
+
+Alive move func:
+
+
+Switches/togglers:
+
+
+Menus:
+
+
+Level Format/Ogmo Level Editor:
+
