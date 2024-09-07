@@ -9,16 +9,15 @@ from statistics import mode
 from random import randint
 #initialize modules and vars
 gm.init()
-a = gm.font.SysFont('sfnsmono',10)
+
 fps = 60
 clock = gm.time.Clock()
 gm.display.set_caption("Legion")
 #EDIT SCREEN SIZE HERE
-size = [400,300]
-screen = gm.display.set_mode(size, vsync = 1)
+size = [800,600]
+screen = gm.display.set_mode(size, flags = gm.SCALED, vsync = 1)
 import legion_func as lf
 view = lf.ViewData(screen,10)
-
 #read in save files
 allsprites = []
 sizes = []
@@ -43,7 +42,8 @@ for i in os.listdir("maps"):
 world = lf.WorldData(allsprites,sizes,backs,num = num)
 text = lf.Textdata()
 view.debug = True
-#lf.simple("the world is quiet here you stranger fella",["q"],world,view)
+#lf.pause("the world is quiet here you stranger fella",world,view, x = 0, y = 200, size = 20, raw = False)
+#lf.simple("hello my friends this is quite strange i guess. Kind of weird though.",["e"], world, view, size = 20)
 #main loop
 def main():
     debug = False
@@ -57,7 +57,7 @@ def main():
         if objectfacing != None:
             objectfacing.change_sprite()
         objectfacing = None
-        lst = lf.looking(world,view,False)
+        lst = lf.looking(world,view,debug)
         if lst != []:
             objectfacing = mode(lst)
             objectfacing.change_sprite(color = [0,0,255,0])
@@ -71,7 +71,6 @@ def main():
             if event.type == gm.KEYDOWN:
                 if event.key == gm.K_k and debug:
                     gm.display.flip()
-                    sleep(0.5)
                 if (event.key == gm.K_SPACE and player.vector.magnitude() != 0 and not player.dodging and
                     not player.ragdoll):
                     player.dodging = 30
@@ -109,7 +108,7 @@ def main():
         tics.append(player.vector.copy())
         if player.vector != [0,0] and not player.ragdoll:
             if (tics[-1] == tics[-2] == tics[-3]) or (tics[-1] != tics[-2]
-                                                      and (tics[-2].y == 0 or tics[-2].x == 0)):
+                        and (tics[-2].y == 0 or tics[-2].x == 0)):
                 player.facing = player.vector.copy()
         #update all sprites
         world.sprites.update(world, text, view)

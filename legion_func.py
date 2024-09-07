@@ -4,6 +4,7 @@ from random import randint
 import os
 from time import sleep
 from math import floor, ceil, sqrt
+import re
 gm.init()
 #Data storage classes
 class WorldData:
@@ -34,18 +35,16 @@ class WorldData:
         self.background = self.allbackgrounds[num]
         self.size = self.allsizes[num]
         self.switches = self.allswitches[num]
-        self.sprites.add(player)
+        self.sprites.add(player,reset = True)
 class ViewData:
     "Class for storing view/screen data."
     def __init__(self,screen, border = 8, wiggle = 12):
         self.screen = screen
         self.screen_size = self.screen.get_size()
         self.view_size = [0.75 * (self.screen_size[0] - border * 3), self.screen_size[1] - border * 2]
-        
-        self.rect = gm.Rect(0,0,self.view_size[0],self.view_size[1]) 
-        self.focus = "0.0"
+        self.rect = gm.Rect(0,0,self.view_size[0],self.view_size[1])
         self.wiggle = wiggle
-        self.font = gm.font.SysFont('sfnsmono', 25, bold = True)
+        self.font = gm.font.SysFont('ptmono', 25, bold = True)
         self.hitbox = False
         self.debug = False
         self.fps = 0 
@@ -93,7 +92,8 @@ class Text:
             self.index = 0
         if scale:
             size = max(1,int(size * (view.screen_size[0] / 800)))
-        self.font = gm.font.SysFont('sfnsmono', size, bold = True)
+        self.font = gm.font.SysFont('ptmono', size, bold = True)
+        self.font_size = self.font.size("a")
         self.view_rect = view.rect.copy()
         self.rect = gm.Rect(0,0,10,10)
         self.rect.move_ip(x,y)
@@ -103,8 +103,8 @@ class Text:
             self.words = self.wrap(None)
         self.rect = self.wrap(None).get_rect()
         self.rect.move_ip(x,y)
-        if self.view_rect.right - self.rect.x <= 5 * font_size[0]:
-            self.rect.move_ip((self.view_rect.right - self.rect.x) - 5 * font_size[0], 0)
+        if self.view_rect.right - self.rect.x <= 5 * self.font_size[0]:
+            self.rect.move_ip((self.view_rect.right - self.rect.x) - 5 * self.font_size[0], 0)
         self.time = time
         self.max_time = time
         self.obj = obj
@@ -119,10 +119,8 @@ class Text:
     def wrap(self,index):
         if index == None:
             index = len(self.raw)
-        font_size = self.font.size("a")
-
         if self.font.size(self.raw[:index])[0] > self.view_rect.width - (self.rect.x - self.view_rect.x):
-            cpl = floor((self.view_rect.width - (self.rect.x - self.view_rect.x)) / font_size[0])
+            cpl = floor((self.view_rect.width - (self.rect.x - self.view_rect.x)) / self.font_size[0])
             sizes = []
             surfs = []
             for i in range(ceil(len(self.raw[:index]) / cpl)):
@@ -139,9 +137,9 @@ class Text:
         else:
             image = self.font.render(self.raw[:index],False,(255,255,255))
         return image
-class Textdata():
+class Textdata:
     def __init__(self):
-        self.font = gm.font.SysFont('sfnsmono', 25, bold = True)
+        self.font = gm.font.SysFont('ptmono', 25, bold = True)
         self.texts = []
     def add(self,words,x,y,time,obj,view,replace,size = 25,scroll = True, scale = False):
         if obj != None:
@@ -175,13 +173,19 @@ class Textdata():
             #the minus one is because the Text() objects do not update if the index == len(.raw)
             i.index = len(i.raw) - 1
             i.update()
+class switch(list):
+    def __getitem__(self,index):
+        if index == None:
+            return 0
+        return super().__getitem__[index]
 class Group:
     "Container class for storing and manipulating groups of sprites"
     def __init__(self, *sprites):
+        self.sprites = {}
         for i in sprites:
             if not isinstance(i,Basic):
                 raise TypeError(f"Must contain only game objects (Inherited from 'basic' class), not {type(i)}")
-        self.sprites = dict(zip([i.tag.split(".")[1] for i in sprites], sprites))
+            self.add(i)
     def update(self,world,text,view):
         stop = False
         for sprite in self:
@@ -190,21 +194,20 @@ class Group:
         for sprite in self.sprites:
             if gm.sprite.collide_rect(sprite,view):
                 view.screen.blit(sprite.image,sprite.rect)
-    def add(self,*sprites):
-        for i in sprites:
-            if not isinstance(i,Basic):
-                raise TypeError("Must contain only game objects (Inherited from 'basic' class)")
+    def add(self,*sprites,reset = False):
         for i in sprites:
             where = i.tag.split(".")[1]
-            if where in self.sprites:
-                raise ValueError("Object with that tag already exists")
+            if where in self.sprites and not reset:
+                raise ValueError(f"Object with tag:'{i.tag}' already exists in group object")
+            elif where in self.sprites and reset:
+                print(f"Overwriting group object at '{i.tag}' with " + str(i))
             self.sprites[where] = i
     def remove(self,*sprites):
         for sprite in sprites:
             if sprite in self.sprites:
                 del self.sprites[self.sprites.tag.split(".")[1]]
             else:
-                raise ValueError("Can only remove sprites already in self")
+                raise ValueError("Can only remove sprites currently in self")
     def collide(self,sprite):
         ls = []
         for i in self:
@@ -215,8 +218,6 @@ class Group:
         if not isinstance(index,str):
             raise TypeError(f"Group getitem function only allows strings, not {type(index)}.")
         return self.sprites[index]
-    def __setitem__(self,index,new):
-        self.sprites[index] = new
     def __delitem__(self,index):
         if not isinstance(index,str):
             raise TypeError(f"Group delitem function only allows strings, not {type(index)}.")
@@ -233,17 +234,18 @@ class Collection:
         for i in sprites:
             if not isinstance(i,Basic):
                 raise TypeError(f"Must only contain sprites, not {type(i)}.")
-            tag = i.tag.split(".")
-            self.collection[tag[0]][tag[1]] = i
-        self.collection["26"]["0"] = Placeholder(0,0,"26.0")
-    def add(self,*sprites):
+            self.add(i)
+        self.add(Placeholder(0,0,"26.0"))
+    def add(self,*sprites,reset = False):
         for i in sprites:
             if not isinstance(i,Basic):
                 raise TypeError(f"Collection.add() must only contain sprites, not {type(i)}.")
+            if not i.verify():
+                raise ValueError(f"{i} object with tag: {i.tag} failed to verify.")
             tag = i.tag.split(".")
-            if tag[0] not in self.collection.keys():
-                self.collection[tag[0]] = Group()
-            self.collection[tag[0]][tag[1]] = i
+            if tag[0] not in self.collection:
+                self[tag[0]] = Group()
+            self[tag[0]].add(i,reset = reset)
     def update(self,world,text,view):
         for group in self:
             group.update(world,text,view)
@@ -328,6 +330,8 @@ class Basic:
         #used to know if a sprite will be displayed. updated during disp() func
         self.show = False
         self.tag = tag
+    def verify(self):
+        return valid_tag(self.tag)
     def change_sprite(self,image = None, color = (0,0,0,0)):
         if image != None:
             sprite = images[image].copy()
@@ -392,7 +396,6 @@ class Savepoint(Basic):
         self.interact = True
     def interaction(self,world,moving,text,view):
         text.add("Saving...",self.rect.x,self.rect.y - 18, 90, self, view, True, 15)
-        
         for level in [i for i in os.listdir("maps/") if ".json" in i]:
             pass
         text.add("Saved.",self.rect.x,self.rect.y - 18, 90, self, view, True, 15)
@@ -404,7 +407,9 @@ class Sign(Basic):
         self.interact = True
         self.empty = True
     def interaction(self,world,moving,text,view):
-        text.add(self.message, self.rect.x, self.rect.y-18 ,90 ,self , viwe, True, 15)
+        text.add(self.message, self.rect.x, self.rect.y-18 ,90 ,self , view, True, 15)
+    def verify(self):
+        return isinstance(self.message,str) and super().verify()
 class Chest(Basic):
     "Sprite class for a chest. Tag is 5.x."
     def __init__(self, x,  y, tag, inside, intype, locked = False, key = False,
@@ -422,9 +427,24 @@ class Chest(Basic):
         self.inside = inside
         self.intype = intype
         self.interact = interact
+        if switch == -1:
+            switch = None
         self.switch = switch
         self.switch_val = switch_val
         self.changed = changed
+    def verify(self):
+        if not isinstance(self.locked,bool) or not isinstance(self.key,bool):
+            return False
+        if self.intype == "item":
+            for i in self.inside:
+                if not isinstance(i,int):
+                    return False
+        elif self.intype == "tool":
+            if self.inside not in weapons:
+                return False
+        elif self.intype != None:
+            return False
+        return super().verify()
     def interaction(self,world,moving,text,view):
         if not isinstance(moving,Pc):
             return None
@@ -434,9 +454,7 @@ class Chest(Basic):
             if self.intype == "item":
                 moving.additem(self.inside[0],self.inside[1])
             elif self.intype == "tool":
-                print("Chest contains tool. Add this in later.")
-            else:
-                raise ValueError(f"Chests can only have 'item' or 'tool' type. Not {self.intype}.")
+                moving.addweapon(self.inside)
         elif self.key and moving[1] >= 1:
             self.locked = False
             self.change_sprite("chestclosed")
@@ -478,7 +496,7 @@ class Ascension(Basic):
 class Door(Basic):
     "Generic sprite class for all doors, including: doors and mapdoors. Tag is 6.x."
     def __init__(self, x, y, tag, switch = None, switch_val = 1, locked = False, key = False,
-                 times = 1, has_switched = 0, image = None):
+                 times = 1, changed = 0, image = None):
         if image == None:
             if locked:
                 image = "doorlocked"
@@ -489,9 +507,21 @@ class Door(Basic):
         self.key = key
         self.interact = True
         self.times = times
-        self.changed = has_switched
+        self.changed = changed
+        if switch == -1:
+            switch = None
         self.switch = switch
         self.switch_val = switch_val
+    def verify(self):
+        if not isinstance(self.key,bool) or not isinstance(self.locked,bool):
+            return False
+        if not isinstance(self.switch,int) and self.switch != None and self.switch <= 255:
+            return False
+        if not isinstance(self.switch_val,int):
+            return False
+        if not isinstance(self.changed,int) or not isinstance(self.times,int):
+            return False
+        return super().verify()
     def open(self,force = False):
         if not self.locked or force:
             self.empty = True
@@ -538,8 +568,6 @@ class Door(Basic):
 class Mapdoor(Basic):
     "Sprite class for door that leads between maps. Tag is 7.x."
     def __init__(self, x, y, tag, direction, target, place):
-        if direction not in ["l","r","u","d"]:
-            raise ValueError(f"Mapdoor direction argument is not a valid direction: {direction}")
         image = "mapdoor" + direction
         super().__init__(x,y,tag,image)
         self.direction = direction
@@ -548,6 +576,14 @@ class Mapdoor(Basic):
         self.active = True
         self.empty = True
         self.hierarchy = "1"
+    def verify(self):
+        if self.direction not in ['u','d','l','r']:
+             return False
+        if not valid_tag(self.target):
+            return False
+        if not isinstance(self.place,int):
+            return False
+        return super().verify()
     def update(self,world,text,view):
         if not gm.sprite.collide_rect(self,world.sprites["0.0"]):
             self.active = True
@@ -581,7 +617,13 @@ class Lever(Basic):
         super().__init__(x,y,tag,image)
         self.on = False
         self.interact = True
+        if switch == -1:
+            switch = None
         self.switch = switch
+    def verify(self):
+        if self.switch != None and not isinstance(self.switch,int):
+            return False
+        return super().verify()
     def interaction(self,world,moving,text,view):
         self.on = not self.on
         if self.switch != None:
@@ -593,7 +635,13 @@ class Button(Basic):
         super().__init__(x, y, tag, image)
         self.empty = True
         self.on = False
+        if switch == -1:
+            switch = None
         self.switch = switch
+    def verify(self):
+        if self.switch != None and not isinstance(self.switch,int):
+            return False
+        return super().verify()
     def update(self, world, text, view):
         for i in world.sprites.collide(self):
             if isinstance(i,Pc):
@@ -621,6 +669,12 @@ class Itrigger(Button):
         else:
             self.others = others
         self.active = True
+    def verify(self):
+        if self.others != None and not valid_tag(self.others):
+            return False
+        if not isinstance(active,bool):
+            return False
+        return super().verify()
     def update(self, world, text, view):
         if self.active:
             super().update(world, text, view)
@@ -635,6 +689,10 @@ class Collectible(Basic):
         self.empty = True
         self.number = number
         self.where = where
+    def verify(self):
+        if not isinstance(self.number,int) or not isinstance(self.where,int):
+            return False
+        return super().verify()
     def movein(self, moving, world, view, text):
         if isinstance(moving,Pc):
             moving.additem(self.where, self.number)
@@ -696,6 +754,8 @@ class Alive(Basic):
         self.damaged = 0
         self.speed = 2
         #class stuff
+    def verify(self):
+        return True
     def move(self,world, view, text):
         "A function specifically for alive sprites to check if they can move along their vector."
         for i in range(self.speed):
@@ -733,7 +793,7 @@ class Alive(Basic):
                 if stop:
                     self.move_rect(-1*vector.x,-1*vector.y)
     def update(self, world, text, view):
-        if self.health <= 0:
+        if self.health != None and self.health <= 0:
             self.die(world, text, view)
     def hit(self,world,damage,power,vector):
         if self.health != None and not self.iframe:
@@ -796,9 +856,41 @@ class Npc(Alive):
         self.inventory = inventory
         self.intype = intype
         self.interact = True
-    def interact(self,world,moving):
-        #placeholder. Do once messages are coded
-        pass
+    def verify(self):
+        if (not isinstance(self.dialogues,list) or not isinstance(self.inventory,list)
+            or not isinstance(self.intype,list)):
+            return False
+        if len(self.dialogues) != len(self.inventory) != len(self.intype):
+            return False
+        for i in range(len(self.dialogues)):
+            if not isinstance(self.dialogues[i],str):
+                return False
+            if self.intype[i] not in [None,"item","tool"]:
+                return False
+            if self.intype[i] == "item":
+                if not isinstance(self.inventory[i],list):
+                    return False
+                if not isinstance(self.inventory[i][0],int):
+                    return False
+                if not isinstance(self.inventory[i][1],int):
+                    return False
+            elif self.intype[i] == "tool" and self.inventory[i] not in weapons:
+                return False
+            elif self.intype[i] == None and self.inventory[i] != None:
+                return False    
+        return super().verify()
+    def interaction(self,world,moving,text,view):
+        if not isinstance(moving,Pc):
+            return None
+        for i in range(len(self.dialogues)):
+            pause(self.dialogues[i],world,view, x = self.rect.x, y = self.rect.bottom, size = 20, raw = True)
+            if self.intype[i] == "item":
+                moving.additem(self.inventory[i][0], self.inventory[i][1])
+            elif self.intype[i] == "tool":
+                moving.addweapon(self.inventory[i])
+        self.dialogues = [self.dialogues[-1]]
+        self.intype = [None]
+        self.inventory = [None]
 class Pot(Alive):
     "Sprite class for pots; they break when attacked or dashed into and drop a collectible. Tag is 15.x."
     def __init__(self,x,y,tag,image = "pot"):
@@ -834,7 +926,7 @@ class Pc(Alive):
             tools = []
         empty = weapons["empty"]
         
-        tools = [weapons[i] for i in tools if weapons[i] != empty] + [empty]
+        tools = [empty] + [weapons[i] for i in tools if weapons[i] != empty]
         self.tools = tools
         self.hand = tools[-1]
         self.loc = loc
@@ -877,14 +969,52 @@ class Pc(Alive):
         for i in range(num):
             if (self.imax[where] == None or self.items[where] < self.imax[where]):
                 self.items[where] += 1
+    def addweapon(self,name):
+        self.tools.append(weapons[name])
 class Enemy(Alive):
     "Sprite class for enemy object. Tag is 17.x."
     def __init__(self, x, y, tag, health, maxhealth, poise, weapon, vision, inventory, image = "playerdown",
                  hitbox = "rect"):
         super().__init__(x, y, tag, health, maxhealth, poise, image = image, hitbox = hitbox)
+        self.target = "0.0"
+        self.inventory = inventory
+        self.vision = gm.Rect(0,0,vision,vision)
+        self.speed = 1
     def update(self,world,text, view):
-        pass
-        #placeholder
+        target = world.sprites[self.target]
+        self.vision.center = self.rect.center
+        line1 = (self.rect.x,self.rect.y,target.rect.x,target.rect.y)
+        line2 = (self.rect.x,self.rect.y,target.rect.right,target.rect.y)
+        line3 = (self.rect.x,self.rect.y,target.rect.x,target.rect.bottom)
+        line4 = (self.rect.x,self.rect.y,target.rect.right,target.rect.bottom)
+        seeing = [True,True,True,True]
+        stop = False
+        for i in world.sprites:
+            for obj in i:
+                if obj == self or obj == target or obj.empty:
+                    continue
+                for hit in obj.hitbox:
+                    if hit.clipline(line1):
+                        seeing[0] = False
+                    if hit.clipline(line2):
+                        seeing[1] = False
+                    if hit.clipline(line3):
+                        seeing[2] = False
+                    if hit.clipline(line4):
+                        seeing[3] = False
+                    if seeing == [False for i in range(4)]:
+                        stop = True
+                        break
+                if stop: break
+            if stop: break
+        if True in seeing and target.collide_rect(self.vision):
+            self.vector.x = num_sign(target.rect.x, self.rect.x)
+            self.vector.y = num_sign(target.rect.y, self.rect.y)
+        else:
+            self.vector.x = 0
+            self.vector.y = 0
+        self.move(world, view, text)
+        #Placeholder
 class Fakewall(Alive):
     "Sprite class for fakewall. When attacked they die and dissapear. Tag is 18.x."
     def __init__(self, x, y, tag, health = 1, maxhealth = 1, image = "iblock"):
@@ -949,35 +1079,60 @@ def read_save(path):
         x = i["x"]*2
         y = i["y"]*2
         #get id
+        values = i["values"]
         tag = i["values"]["ID"]
         tagtype = tag.split(".")[0]
         if int(tagtype) in [1,2,3,4,11,12,13,15,18,19,20,21,22,23,24]:
             tag = tagtype + "." + str(len([i for i in sprites if i.tag.split(".")[0] == tagtype]))
             i["values"]["ID"] = tag
-        values = i["values"]
         #do any formatting of values, eg. turn str into lists when applicable
         for attr in values:
-            if isinstance(values[attr],str):
-                if values[attr] == "None":
-                    values[attr] = None
-                elif values[attr][:2] == "//":
-                    #do list parsing
-                    if values[attr][2] == "s":
-                        values[attr] = values[attr][3:].split(",")
-                    elif values[attr][2] == "i":
-                        values[attr] = [int(i) for i in values[attr][3:].split(",")]
-                    elif len(values[attr]) == 2:
-                        values[attr] = []
-                    else:
-                        raise ValueError(f"Only accept list types are 's' and 'i'. Not {values[attr][2]}")
-            elif isinstance(values[attr],int):
-                if values[attr] == -1337:
-                    values[attr] = None
+            values[attr] = read_save_escapes(values[attr])
         sprite = classes[int(tag.split(".")[0])](x,y,*list(values.values()))
         sprites.append(sprite)
     background = "background"
     size = [data["width"]*2,data["height"]*2]
     return(sprites,size,background,data)
+def read_save_escapes(value):
+    "Function for parsing savefile strings to extract lists or None value"
+    if isinstance(value,str):
+        if len(value) == 0:
+            return ""
+        if value[0] == "/" and value[1] in ["i","s","d"]:
+            ls = []
+            current = ""
+            escape = False
+            for i in range(len(value[2:])):
+                #forwardslash should only be an escape character if it is not already escaped
+                #and it can escape a comma
+                if value[i+2] == "/" and not escape and value[i+3] == ",":
+                    escape = True
+                elif value[i+2] == "," and escape:
+                    escape = False
+                    current += ","
+                elif value[i+2] == ",":
+                    escape = False
+                    ls.append(current)
+                    current = ""
+                elif i == len(value[2:]) - 1:
+                    current += value[i+2]
+                    ls.append(current)
+                else:
+                    escape = False
+                    current += value[i+2]
+            if value[1] == "s":
+                return ls
+            elif value[1] == "i":
+                return [int(i) for i in ls]
+            elif value[1] == "d":
+                return [read_save_escapes(i) for i in ls]
+        else:
+            if value == "/n":
+                return None
+            else:
+                return value
+    else:
+        return value
 def looking(world,view,debug = False):
     player = world.sprites["0.0"]
     ys = []
@@ -1017,17 +1172,31 @@ def looking(world,view,debug = False):
                     if filled: break
                 if filled: break 
             if filled: break
-    return lst   
+    return lst
+def valid_tag(tag):
+    if not isinstance(tag,str) or "." not in tag:
+        return False
+    tag = tag.split(".")
+    if len(tag) != 2:
+        return False
+    try:
+        int(tag[0])
+        int(tag[1])
+    except:
+        return False
+    return True
+def num_sign(num1,num2):
+    return (num1 - num2 > 0) - (num1 - num2 < 0)
 #Menu functions
-def simple(message, keys, world, view, viewpoint = "0.0", x = 0, y = 200):
+def simple(message, keys, world, view, viewpoint = "0.0", x = 0, y = 200, size = 30, raw = False):
     keys = [ord(str(i)) for i in keys]
     stop = False
     text = Textdata()
     disp(world,view,text,viewpoint)
-    
-    x = view.rect.x + view.border + x
-    y = view.rect.y + view.border + y
-    text.add(message, x, y ,len(message)+2,None,view,False, size = 30)
+    if not raw:
+        x = view.rect.x + x
+        y = view.rect.y + y
+    text.add(message, x, y ,len(message)+2,None,view,False, size = size)
     for i in range(len(message)+1):
         text.update(view)
         for event in gm.event.get():
@@ -1060,22 +1229,23 @@ def timed(time, world, view, text, viewpoint = "0.0"):
             if event.type == gm.QUIT:
                 exit()
         disp(world,view,text,viewpoint)
-        view.screen.fill((80,80,80),rect=gm.Rect(view.rect.x + view.border,view.rect.y + view.border,
+        
+        view.screen.fill((80,80,80),rect=gm.Rect(view.border, view.border,
                                                 view.rect.width, view.rect.height),special_flags=gm.BLEND_ADD)
         view.screen.fill((0,0,0),rect = gm.Rect(view.border,view.border,view.rect.width,view.rect.height/6))
-        view.screen.fill((0,0,0),rect = gm.Rect(view.border,view.border + round(view.rect.height*5/6),
-                                                view.rect.width,view.rect.height/6))
+        view.screen.fill((0,0,0),rect = gm.Rect(view.border,view.border + view.rect.height*5/6,
+                                                view.rect.width,view.rect.height/6 + 1))
         gm.display.flip()
         clock.tick(60)
-def binary(message, world, view, viewpoint = "0.0", x = 5, y = 200):
-    return(simple(message, ["y","n"], world, view, viewpoint, x, y))
-def pause(message, world, view, viewpoint = "0.0", x = 5, y = 200):
-    simple(message + " Press enter to continue.", ["\r"], world, view, viewpoint, x, y)
+def binary(message, world, view, viewpoint = "0.0", x = 5, y = 200, size = 30, raw = False):
+    return(simple(message, ["y","n"], world, view, viewpoint, x, y,size, raw))
+def pause(message, world, view, viewpoint = "0.0", x = 5, y = 200, size = 30, raw = False):
+    simple(message + " Press enter to continue.", ["\r"], world, view, viewpoint, x, y, size, raw)
 def pausegame(world, view):
     return(simple("Game paused. Press escape to resume and q to go to main menu.", ["\x1b","q"], world, view))
-def talkscene(messages, world, view, viewpoint = "0.0", x = 5, y = 200):
+def talkscene(messages, world, view, viewpoint = "0.0", x = 5, y = 200, size = 30):
     for i in messages:
-        self.pause(i, world, view, viepoint, x, y)
+        pause(i, world, view, viewpoint, x, y, size)
 #Animation Functions
 def fade(world,view,text,time,fadeout = True):
     for i in range(time*60):
@@ -1123,7 +1293,7 @@ def disp(world,view,text,center = "0.0"):
             if sprite.alive and sprite.show:
                 view.screen.blit(sprite.image,[sprite.rect.x - view.rect.x + view.border,
                                                sprite.rect.y - view.rect.y + view.border])
-            if isinstance(sprite,Pc) and sprite.dodging > 10:
+            """if isinstance(sprite,Pc) and sprite.dodging > 10:
                 direction = sprite.image_name[6:]
                 xchange = 0
                 ychange = 0
@@ -1137,12 +1307,12 @@ def disp(world,view,text,center = "0.0"):
                     ychange = -10
                 image = images["playerdash" + direction]
                 view.screen.blit(image,[sprite.rect.x + xchange - view.rect.x + view.border,
-                                        sprite.rect.y +ychange - view.rect.y + view.border])
+                                        sprite.rect.y +ychange - view.rect.y + view.border])"""
     #health bars
     for sprite in world.sprites["17"]:
         if sprite.show:
             view.screen.fill((255,0,0),rect=gm.Rect(sprite.rect.x - view.rect.x + view.border,
-                                    sprite.rect.y - 5 - view.rect.y + view.border, sprite.rect.width, 3))
+                                    sprite.rect.y - 5 - view.rect.y + view.border, sprite.rect.width*1.3, 3))
             view.screen.fill((0,255,0),rect=gm.Rect(sprite.rect.x - view.rect.x + view.border,
                                     sprite.rect.y - 5 - view.rect.y + view.border,
                                     round(sprite.health/sprite.maxhealth * sprite.rect.width * 1.3),3))
@@ -1153,27 +1323,11 @@ def disp(world,view,text,center = "0.0"):
         for i in world.sprites:
             for j in i:
                 for hitbox in j.hitbox:
-                    view.screen.fill((0,255,0,0),rect = gm.Rect(hitbox.x - view.rect.x + view.border,
+                    gm.draw.rect(view.screen, (0,255,0,0),rect = gm.Rect(hitbox.x - view.rect.x + view.border,
                                     hitbox.y - view.rect.y + view.border, hitbox.width,hitbox.height))
-    
     #display text from Text object
     for i in text.texts:
         view.screen.blit(i.words,i.rect.move(view.border-view.rect.x,view.border-view.rect.y))
-        continue
-        if abs(i.max_time - i.time) >= 2:# or i.rect.height >= view.rect.height or i.rect.width >= view.rect.width:
-            view.screen.blit(i.words,i.rect.move(view.border-view.rect.x,view.border-view.rect.y))
-            continue
-        if not view.rect.contains(i.rect):
-            if i.rect.y < view.rect.y:
-                i.rect.move_ip(0,view.rect.y - i.rect.y)
-            elif i.rect.bottom > view.rect.bottom:
-                i.rect.move_ip(0,view.rect.bottom - i.rect.bottom)
-            if i.rect.right > view.rect.right:
-                i.rect.move_ip(view.rect.right - i.rect.right,0)
-            elif i.rect.x < view.rect.x:
-                i.rect.move_ip(view.rect.x - i.rect.x, 0)
-        view.screen.blit(i.words,i.rect.move(view.border-view.rect.x,view.border-view.rect.y))
-             
     #drawing black spaces
     rect = gm.Rect(0,view.view_size[1]+view.border,view.screen_size[0],view.screen_size[1]-view.view_size[1])
     view.screen.fill([0,0,0],rect = rect)
