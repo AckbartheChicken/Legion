@@ -291,7 +291,8 @@ class Hitbox:
         self.rects = [i.copy() for i in rects]
     def move_ip(self, x = 0, y = 0):
         for i in self.rects:
-            i.move_ip(x,y)
+            i.x = i.x + x
+            i.y = i.y + y
     def move(self, x = 0, y = 0):
         ls = []
         for i in self.rects:
@@ -320,6 +321,7 @@ class Basic:
         #will be the same as self.rect
         if hitbox == "rect":
             self.hitbox = Hitbox(self.rect)
+        self.position = gm.math.Vector2(x,y)
         self.empty = False
         self.interact = False
         self.alive = False
@@ -366,12 +368,18 @@ class Basic:
                 return True
         return False
     def move_rect(self,x,y,offset = True):
+        moved = False
+        new = gm.math.Vector2(x,y)
         if offset:
-            self.rect.move_ip(x,y)
-            self.hitbox.move_ip(x,y)
+            self.position = vec_add(self.position, new, True)
         else:
-            self.rect.move_ip(x - self.rect.x, y - self.rect.y)
-            self.hitbox.move_ip(x - self.rect.x, y - self.rect.y)
+            self.position = new
+        self.hitbox.move_ip(self.position.x - self.rect.x, self.position.y - self.rect.y)
+        x, y = self.rect.topleft
+        self.rect.topleft = (self.position.x, self.position.y)
+        if (x, y) != self.rect.topleft:
+            moved = True
+        return moved
 class Iblock(Basic):
     "Sprite class for immovable blocks. (Walls). Tag is 1.x."
     def __init__(self, x, y, tag, image = 'iblock'):
@@ -385,7 +393,6 @@ class Spike(Basic):
     def checkin(self,world,moving):
         return moving.alive
     def movein(self,moving, world, view, text):
-        #Placeholder. Write this once player knockback and movement is done.
         if moving.alive:
             moving.hit(world,2,moving.poise + 2, gm.Vector2(moving.vector.x*-1,moving.vector.y*-1))
         return False
@@ -527,8 +534,11 @@ class Door(Basic):
             self.empty = True
             self.change_sprite("dooropen")
             self.interact = False
-    def close(self):
+    def close(self,world):
         if self.empty:
+            collisions = world.sprites.collide(self)
+            if collisions:
+                print("Make door push out")
             self.empty = False
             self.change_sprite("doorclosed")
             self.interact = True
@@ -644,7 +654,7 @@ class Button(Basic):
         return super().verify()
     def update(self, world, text, view):
         for i in world.sprites.collide(self):
-            if isinstance(i,Pc):
+            if isinstance(i,Alive):
                 if not self.on and self.switch != None:
                     world.switches[self.switch] += 1
                 self.on = True
@@ -752,17 +762,33 @@ class Alive(Basic):
         self.dodging = 0
         self.attacking = 0
         self.damaged = 0
-        self.speed = 2
+        self.speed = 1
         #class stuff
+        self.oldpos = self.position.copy()
+        self.current_speed = 0
     def verify(self):
         return True
     def move(self,world, view, text):
         "A function specifically for alive sprites to check if they can move along their vector."
-        for i in range(self.speed):
-            for vector in (gm.math.Vector2(self.vector.x,0),gm.math.Vector2(0,self.vector.y)):
-                stop = False
-                self.move_rect(vector.x,vector.y)
+        #Normalizing vector to be same magnitude regardless of direction
+        normvec = self.vector.copy()
+        if 0 in self.vector:
+            normvec = vec_mult(self.vector,self.speed,False)
+        else:
+            distance = (2**0.5)/2 * self.speed
+            normvec = gm.math.Vector2(distance*self.vector.x, distance*self.vector.y)
+        
+        self.current_speed = round(((self.position.y - self.oldpos.y)**2 + (self.position.x-self.oldpos.x)**2)**0.5,2)
+        self.oldpos = self.position.copy()
+
+        for vector in (gm.math.Vector2(normvec.x,0),gm.math.Vector2(0,normvec.y)):
+            vector = vec_mult(vector,0.25,False)
+            for i in range(4):
+                if not self.move_rect(vector.x,vector.y):
+                    continue
+
                 collides = world.sprites.collide(self)
+                stop = False
                 valid = []
                 if not world.size.contains(self):
                     valid = [False]
@@ -915,7 +941,7 @@ class Pot(Alive):
 class Pc(Alive):
     "Sprite class for player character. Tag is 0.x."
     def __init__(self, x, y, tag, health = 20, maxhealth = 20, poise = 5,items = None, tools = None,
-                 loc = 0, image = "playerdown", god = False, hitbox = "rect"):
+                 loc = 0, dodge_factor = 10, image = "playerdown", god = False, hitbox = "rect"):
         super().__init__(x, y, tag , health , maxhealth , poise, god, image, hitbox)
         if items == None:
             items = [0,0,0,0,0,0,0]
@@ -930,6 +956,8 @@ class Pc(Alive):
         self.tools = tools
         self.hand = tools[-1]
         self.loc = loc
+        self.speed = 2
+        self.dodge_factor = dodge_factor
     def update(self, world, text, view):
         psprites = [[None,"up",None],
                     ["left", None, "right"],
@@ -941,13 +969,12 @@ class Pc(Alive):
         if self.damaged:
             self.change_sprite(color = (255,0,0))
         
-        loc = self.loc
         if self.vector.magnitude() != 0:
             self.move(world, view, text)
         if self.dodging > 0:
             if self.dodging == 10:
                 self.change_sprite()
-                self.speed = round(self.speed / 2)
+                self.speed = self.speed / self.dodge_factor
             elif self.dodging > 10:
                 self.change_sprite(color = [0,100,100,0])
             self.dodging -= 1
@@ -979,8 +1006,10 @@ class Enemy(Alive):
         self.target = "0.0"
         self.inventory = inventory
         self.vision = gm.Rect(0,0,vision,vision)
-        self.speed = 1
-    def update(self,world,text, view):
+        self.speed = 1.25
+    def ai(self, world):
+        if self.ragdoll:
+            return None
         target = world.sprites[self.target]
         self.vision.center = self.rect.center
         line1 = (self.rect.x,self.rect.y,target.rect.x,target.rect.y)
@@ -991,7 +1020,7 @@ class Enemy(Alive):
         stop = False
         for i in world.sprites:
             for obj in i:
-                if obj == self or obj == target or obj.empty:
+                if obj == self or obj == target or (obj.empty and not isinstance(obj,Spike)):
                     continue
                 for hit in obj.hitbox:
                     if hit.clipline(line1):
@@ -1013,8 +1042,23 @@ class Enemy(Alive):
         else:
             self.vector.x = 0
             self.vector.y = 0
-        self.move(world, view, text)
-        #Placeholder
+    def update(self,world,text, view):
+        self.ai(world)
+        if self.vector.magnitude() != 0:
+            self.move(world, view, text)
+        #status
+        if self.ragdoll > 0:
+            self.ragdoll -= 1
+        if self.iframe > 0:
+            self.iframe -= 1
+        if self.damaged > 0:
+            self.damaged -= 1
+            self.change_sprite(color = (255,0,0))
+        else:
+            self.change_sprite()
+        if self.health <= 0:
+            self.die(world,text,view)
+
 class Fakewall(Alive):
     "Sprite class for fakewall. When attacked they die and dissapear. Tag is 18.x."
     def __init__(self, x, y, tag, health = 1, maxhealth = 1, image = "iblock"):
@@ -1187,6 +1231,20 @@ def valid_tag(tag):
     return True
 def num_sign(num1,num2):
     return (num1 - num2 > 0) - (num1 - num2 < 0)
+def vec_add(vec1,vec2,both):
+    vec1 = vec1.copy()
+    if both:
+        vec2 = vec2.copy()
+        return gm.math.Vector2(vec1.x + vec2.x, vec1.y + vec2.y)
+    else:
+        return gm.math.Vector2(vec1.x + vec2, vec1.y + vec2)
+def vec_mult(vec1,vec2,both):
+    vec1 = vec1.copy()
+    if both:
+        vec2 = vec2.copy()
+        return gm.math.Vector2(vec1.x * vec2.x, vec1.y * vec2.y)
+    else:
+        return gm.math.Vector2(vec1.x * vec2, vec1.y * vec2)
 #Menu functions
 def simple(message, keys, world, view, viewpoint = "0.0", x = 0, y = 200, size = 30, raw = False):
     keys = [ord(str(i)) for i in keys]
@@ -1315,9 +1373,9 @@ def disp(world,view,text,center = "0.0"):
                                     sprite.rect.y - 5 - view.rect.y + view.border, sprite.rect.width*1.3, 3))
             view.screen.fill((0,255,0),rect=gm.Rect(sprite.rect.x - view.rect.x + view.border,
                                     sprite.rect.y - 5 - view.rect.y + view.border,
-                                    round(sprite.health/sprite.maxhealth * sprite.rect.width * 1.3),3))
-    view.screen.fill((255,0,0),rect=gm.Rect(10+view.border,10+view.border,round(player.maxhealth*10),10))
-    view.screen.fill((0,255,0),rect=gm.Rect(10+view.border,10+view.border,round(player.health*10),10))    
+                                    sprite.health/sprite.maxhealth * sprite.rect.width * 1.3, 3))
+    view.screen.fill((255,0,0),rect=gm.Rect(10+view.border,10+view.border, player.maxhealth*10, 10))
+    view.screen.fill((0,255,0),rect=gm.Rect(10+view.border,10+view.border, player.health*10, 10))    
     #This will show hitboxes if hitbox mode is on
     if view.hitbox:
         for i in world.sprites:
@@ -1342,6 +1400,7 @@ def disp(world,view,text,center = "0.0"):
                 else view.font.render(i.name,False,(255,0,0)) for i in player.tools]
     if view.debug:
         buttons.append(view.font.render("FPS:%s" % (view.fps), False, (255,255,255)))
+        buttons.append(view.font.render(f"Speed:{player.current_speed}", False, (255, 255, 255)))
     for i in range(len(buttons)):
         view.screen.blit(buttons[i],(view.view_size[0] + view.border*2,view.border + 40*i))   
     #Drawing border:

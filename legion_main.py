@@ -9,7 +9,6 @@ from statistics import mode
 from random import randint
 #initialize modules and vars
 gm.init()
-
 fps = 60
 clock = gm.time.Clock()
 gm.display.set_caption("Legion")
@@ -76,7 +75,7 @@ def main():
                     player.dodging = 30
                     player.ragdoll = 20
                     player.iframe = 20
-                    player.speed *= 2
+                    player.speed *= player.dodge_factor
                 elif event.key == gm.K_k and objectfacing != None and not player.ragdoll:
                     objectfacing.interaction(world,player,text,view)
                     objectfacing.change_sprite(color = [0,0,255,0])
@@ -127,7 +126,7 @@ def main():
         #graphics
         lf.disp(world,view,text)
         gm.display.flip()
-        clock.tick(60)
+        clock.tick(fps)
         view.fps = clock.get_fps()
         
 if __name__ == '__main__':
