@@ -4,8 +4,19 @@ from random import randint
 import os
 from time import sleep
 from math import floor, ceil, sqrt
+from timeit import default_timer as timer
 import re
 gm.init()
+#func
+
+def func_timer(func):
+    def get_time(*args,**kwargs):
+        start = timer()
+        data = func(*args,**kwargs)
+        end = timer()
+        print((end - start) * 60)
+        return data
+    return get_time
 #Data storage classes
 class WorldData:
     "Class for storing world/game data."
@@ -180,16 +191,26 @@ class switch(list):
         return super().__getitem__[index]
 class Group:
     "Container class for storing and manipulating groups of sprites"
-    def __init__(self, *sprites):
+    def __init__(self, tag, *sprites):
         self.sprites = {}
         for i in sprites:
             if not isinstance(i,Basic):
                 raise TypeError(f"Must contain only game objects (Inherited from 'basic' class), not {type(i)}")
             self.add(i)
+        self.tag = tag
     def update(self,world,text,view):
         stop = False
         for sprite in self:
             sprite.update(world,text,view)
+    def high_tag(self):
+        if len(self.sprites) == 0:
+            return None
+        tag = 0
+        for sprite in self:
+            sprite_tag = sprite.tag.split(".")[1]
+            if int(sprite_tag) > tag:
+                tag = int(sprite_tag)
+        return tag
     def draw(self,view):
         for sprite in self.sprites:
             if gm.sprite.collide_rect(sprite,view):
@@ -214,6 +235,12 @@ class Group:
             if sprite.collide(i):
                 ls.append(i)
         return ls
+    def collide_rect(self,rect):
+        ls = []
+        for sprite in self:
+            if sprite.collide_rect(rect):
+                ls.append(sprite)
+        return ls
     def __getitem__(self,index):
         if not isinstance(index,str):
             raise TypeError(f"Group getitem function only allows strings, not {type(index)}.")
@@ -230,7 +257,7 @@ class Collection:
     """Class for storing many sprite groups. It is essentially an expanded dictionary with a
         few extra functions."""
     def __init__(self,*sprites):
-        self.collection = dict(zip([str(i) for i in range(27)],[Group() for i in range(27)]))
+        self.collection = dict(zip([str(i) for i in range(27)],[Group(i) for i in range(27)]))
         for i in sprites:
             if not isinstance(i,Basic):
                 raise TypeError(f"Must only contain sprites, not {type(i)}.")
@@ -244,8 +271,9 @@ class Collection:
                 raise ValueError(f"{i} object with tag: {i.tag} failed to verify.")
             tag = i.tag.split(".")
             if tag[0] not in self.collection:
-                self[tag[0]] = Group()
+                self[tag[0]] = Group(tag[0])
             self[tag[0]].add(i,reset = reset)
+    #@func_timer
     def update(self,world,text,view):
         for group in self:
             group.update(world,text,view)
@@ -256,6 +284,11 @@ class Collection:
         ls = []
         for i in self:
             ls += i.collide(sprite)
+        return ls
+    def collide_rect(self,rect):
+        ls = []
+        for i in self:
+            ls += i.collide_rect(rect)
         return ls
     def __iter__(self):
         return(iter(self.collection.values()))
@@ -393,8 +426,7 @@ class Spike(Basic):
     def checkin(self,world,moving):
         return moving.alive
     def movein(self,moving, world, view, text):
-        if moving.alive:
-            moving.hit(world,2,moving.poise + 2, gm.Vector2(moving.vector.x*-1,moving.vector.y*-1))
+        moving.hit(world,2,moving.poise + 2, gm.Vector2(moving.vector.x*-1,moving.vector.y*-1))
         return False
 class Savepoint(Basic):
     "Sprite class where player will save progress. Tag is 3.x."
@@ -460,8 +492,10 @@ class Chest(Basic):
             self.interact = False
             if self.intype == "item":
                 moving.additem(self.inside[0],self.inside[1])
+                pause(f"You got a ... {moving.inames[self.inside[1]]}!", world, view)
             elif self.intype == "tool":
                 moving.addweapon(self.inside)
+                pause(f"You got a ... {self.inside}!", world, view)
         elif self.key and moving[1] >= 1:
             self.locked = False
             self.change_sprite("chestclosed")
@@ -733,7 +767,7 @@ class C1(Collectible):
             for i in range(self.number):
                 if moving.health < moving.maxhealth:
                     moving.health += 1
-        self.remove = True
+            self.remove = True
         return(True)
 class C2(Collectible):
     "Sprite class for a specific collectible. Tag is 22.x"
@@ -777,10 +811,10 @@ class Alive(Basic):
         else:
             distance = (2**0.5)/2 * self.speed
             normvec = gm.math.Vector2(distance*self.vector.x, distance*self.vector.y)
-        
+        #calculate current speed for debug purposes
         self.current_speed = round(((self.position.y - self.oldpos.y)**2 + (self.position.x-self.oldpos.x)**2)**0.5,2)
         self.oldpos = self.position.copy()
-
+        #Split normalized into x and y axis, then splits into four equal parts and moves that amount 4 times
         for vector in (gm.math.Vector2(normvec.x,0),gm.math.Vector2(0,normvec.y)):
             vector = vec_mult(vector,0.25,False)
             for i in range(4):
@@ -790,6 +824,7 @@ class Alive(Basic):
                 collides = world.sprites.collide(self)
                 stop = False
                 valid = []
+                #Prevents sprites from moving out of world
                 if not world.size.contains(self):
                     valid = [False]
                 ranking = {"None":[]}
@@ -941,7 +976,7 @@ class Pot(Alive):
 class Pc(Alive):
     "Sprite class for player character. Tag is 0.x."
     def __init__(self, x, y, tag, health = 20, maxhealth = 20, poise = 5,items = None, tools = None,
-                 loc = 0, dodge_factor = 10, image = "playerdown", god = False, hitbox = "rect"):
+                 loc = 0, dodge_factor = 1.5, image = "playerdown", god = False, hitbox = "rect"):
         super().__init__(x, y, tag , health , maxhealth , poise, god, image, hitbox)
         if items == None:
             items = [0,0,0,0,0,0,0]
@@ -956,9 +991,10 @@ class Pc(Alive):
         self.tools = tools
         self.hand = tools[-1]
         self.loc = loc
-        self.speed = 2
+        self.speed = 3
         self.dodge_factor = dodge_factor
     def update(self, world, text, view):
+        #managing sprite/animation
         psprites = [[None,"up",None],
                     ["left", None, "right"],
                     [None,"down",None]]
@@ -972,12 +1008,13 @@ class Pc(Alive):
         if self.vector.magnitude() != 0:
             self.move(world, view, text)
         if self.dodging > 0:
+            
+            self.dodging -= 1
             if self.dodging == 10:
                 self.change_sprite()
                 self.speed = self.speed / self.dodge_factor
             elif self.dodging > 10:
                 self.change_sprite(color = [0,100,100,0])
-            self.dodging -= 1
         if self.ragdoll > 0:
             self.ragdoll -= 1
         if self.iframe > 0:
@@ -1006,12 +1043,21 @@ class Enemy(Alive):
         self.target = "0.0"
         self.inventory = inventory
         self.vision = gm.Rect(0,0,vision,vision)
-        self.speed = 1.25
+        self.speed = 1.5
+        self.semis = [Pot,Spike]
+        self.refresh = 15
+        self.until_refresh = 0
+        self.path = []
     def ai(self, world):
-        if self.ragdoll:
-            return None
+        "Function that handles enemy movement and directionality."
         target = world.sprites[self.target]
         self.vision.center = self.rect.center
+        #check if target is in range and that enemy isn't ragdolled
+        if not target.collide_rect(self.vision) or self.ragdoll:
+            self.vector.x = 0
+            self.vector.y = 0
+            return None
+        #check if enemy has line of sight to target
         line1 = (self.rect.x,self.rect.y,target.rect.x,target.rect.y)
         line2 = (self.rect.x,self.rect.y,target.rect.right,target.rect.y)
         line3 = (self.rect.x,self.rect.y,target.rect.x,target.rect.bottom)
@@ -1020,7 +1066,7 @@ class Enemy(Alive):
         stop = False
         for i in world.sprites:
             for obj in i:
-                if obj == self or obj == target or (obj.empty and not isinstance(obj,Spike)):
+                if obj == self or obj == target or obj.empty:
                     continue
                 for hit in obj.hitbox:
                     if hit.clipline(line1):
@@ -1036,12 +1082,78 @@ class Enemy(Alive):
                         break
                 if stop: break
             if stop: break
-        if True in seeing and target.collide_rect(self.vision):
-            self.vector.x = num_sign(target.rect.x, self.rect.x)
-            self.vector.y = num_sign(target.rect.y, self.rect.y)
+        #if enemy can see target: do pathfinding
+        if True in seeing:
+            if self.until_refresh == 0:
+                self.until_refresh = self.refresh
+                self.path = self.pathfind(world)
+            elif self.until_refresh > 0:
+                self.until_refresh -= 1
+                self.path = self.path[1:]
+            #if no path: don't move 
+            if len(self.path) == 0:
+                self.vector.x = 0
+                self.vecor.y = 0
+            else:
+                self.vector = self.path[0]
         else:
             self.vector.x = 0
             self.vector.y = 0
+    def pathfind(self,world):
+        "Pathfinding function that generates a list of vectors for enemies to move along"
+        target = world.sprites[self.target]
+        ls = [gm.math.Vector2(num_sign(target.rect.x, self.rect.x),
+                              num_sign(target.rect.y, self.rect.y))]
+        pos = self.position.copy()
+        
+        for i in range(self.refresh):
+            if 0 in ls[-1]:
+                normvec = vec_mult(ls[-1],self.speed,False)
+            else:
+                distance = (2**0.5)/2 * self.speed
+                normvec = gm.math.Vector2(distance*ls[-1].x, distance*ls[-1].y)
+        
+            pos.x += normvec.x
+            pos.y += normvec.y
+            
+            vec = gm.math.Vector2(num_sign(target.rect.x, pos.x),
+                                      num_sign(target.rect.y, pos.y))
+            if abs(target.rect.x - pos.x) < 5:
+                vec.x = 0
+            if abs(target.rect.y - pos.y) < 5:
+                vec.y = 0
+            ls.append(vec)
+        return ls
+    def checkmove(self,world):
+        "Part of enemy pathfinding algorithm to check if it can move in a direction"
+        #Normalizing vector to be same magnitude regardless of direction
+        normvec = self.vector.copy()
+        if 0 in self.vector:
+            normvec = vec_mult(self.vector,self.speed,False)
+        else:
+            distance = (2**0.5)/2 * self.speed
+            normvec = gm.math.Vector2(distance*self.vector.x, distance*self.vector.y)
+        
+        #Split normalized into x and y axis, then splits into four equal parts and moves that amount 4 times
+        for vector in (gm.math.Vector2(normvec.x,0),gm.math.Vector2(0,normvec.y)):
+            vector = vec_mult(vector,0.25,False)
+            for i in range(4):
+                if not self.move_rect(vector.x,vector.y):
+                    continue
+
+                collides = world.sprites.collide(self)
+                stop = False
+                valid = []
+                #Prevents sprites from moving out of world
+                if not world.size.contains(self):
+                    valid = [False]
+                #call checkin funcs to see if player could move in its current state
+                for i in collides:
+                    valid.append(i.checkin(world,self))
+                #check if  player could move into all other sprites
+                if valid != [True for i in valid]:
+                    self.move_rect(-1*vector.x,-1*vector.y)
+                    continue
     def update(self,world,text, view):
         self.ai(world)
         if self.vector.magnitude() != 0:
@@ -1177,6 +1289,7 @@ def read_save_escapes(value):
                 return value
     else:
         return value
+#@func_timer
 def looking(world,view,debug = False):
     player = world.sprites["0.0"]
     ys = []
@@ -1184,38 +1297,79 @@ def looking(world,view,debug = False):
     lst = []
     l_interact = 18
     w_interact = 7 + 7 * (player.facing.y == 0)
-    rect = player.rect
-    #get starting point for interaction
-    if 0 in player.facing:
-        y1 = rect.y+ceil((1/2*(rect.height)*(player.facing.y+1)))-(player.facing.x*(w_interact-1))
-        x1 = rect.x+ceil((1/2*(rect.width)*(player.facing.x+1)))-(player.facing.y*(w_interact-1)/2)-(player.facing.y)*3
-    else:
-        y1 = rect.y+round((1/2*(rect.height-1)*(player.facing.y+1))) + (player.facing.y) * 10
-        x1 = rect.x+round((1/2*(rect.width-1)*(player.facing.x+1)))
+    rect = player.rect    #get starting point for interaction
+
+    match [player.facing.x,player.facing.y]:
+        case [0,1]:
+            look_rect = gm.Rect(0, 0, w_interact * 2, l_interact * 2)
+            look_rect.midtop = rect.midbottom
+            x1, y1 = look_rect.topleft
+        case [0,-1]:
+            look_rect = gm.Rect(0, 0, w_interact * 2, l_interact * 2)
+            look_rect.midbottom = rect.midtop
+            x1, y1 = look_rect.bottomright
+        case [1,0]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, w_interact * 2)
+            look_rect.midleft = rect.midright
+            x1, y1 = look_rect.topleft
+        case [-1,0]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, w_interact * 2)
+            look_rect.midright = rect.midleft
+            x1, y1 = look_rect.bottomright
+        case [1, 1]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, l_interact * 3)
+            look_rect.topleft = rect.bottomright
+            look_rect.move_ip(0, -l_interact)
+            x1, y1 = rect.bottomright
+        case [1, -1]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, l_interact * 3)
+            look_rect.bottomleft = rect.topright
+            look_rect.move_ip(0, l_interact)
+            x1, y1 = rect.topright
+        case [-1, 1]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, l_interact * 3)
+            look_rect.topright = rect.bottomleft
+            look_rect.move_ip(0, -l_interact)
+            x1, y1 = rect.bottomleft
+        case [-1, -1]:
+            look_rect = gm.Rect(0, 0, l_interact * 2, l_interact * 3)
+            look_rect.bottomright = rect.topleft
+            look_rect.move_ip(0, l_interact)
+            x1, y1 = rect.topleft
+    #get sprites that are in looking rect
+    if debug:
+        gm.draw.rect(view.screen,(100,100,100),gm.Rect(look_rect.x - view.rect.x + view.border,
+                                    look_rect.y - view.rect.y + view.border, look_rect.width,look_rect.height))
+    use_sprites = world.sprites.collide_rect(look_rect)
+    #do in depth analysis on smaller amount of sprites 
     for i in range(w_interact):
         for j in range(1,l_interact):
             filled = False
+            interact = False
+            line_ls = []
             if 0 in player.facing:
-                y = y1+2*(j*player.facing.y+i*player.facing.x)
-                x = x1+2*(j*player.facing.x+i*player.facing.y)
+                y = y1 + 2 * (j * player.facing.y + i * player.facing.x)
+                x = x1 + 2 * (j * player.facing.x + i * player.facing.y)
             else:
                 y = y1+2*(((j%2)*j*player.facing.y)+(int(not(j%2))*(j-1)*player.facing.y)-i*player.facing.y)
                 x = x1+2*(int(not(j%2))*j*player.facing.x)+((j%2)*(j-1)*player.facing.x)
             if debug:
                 view.screen.fill((255,255,255),rect=gm.Rect(x-view.rect.x+view.border,y-view.rect.y+view.border,1,1))
-            for k in world.sprites:
-                for sprite in k:
-                    for box in sprite.hitbox:
-                        if box.collidepoint(x,y) and sprite != player:
-                            if not sprite.empty:
-                                filled = True
-                            if sprite.interact:
-                                lst.append(sprite)
-                                filled = True
-                                break
-                    if filled: break
-                if filled: break 
-            if filled: break
+            for sprite in use_sprites:
+                if sprite == player:
+                    continue
+                for box in sprite.hitbox:
+                    if box.collidepoint(x,y):
+                        if sprite.interact:
+                            line_ls.append(sprite)
+                            interact = True
+                        elif not sprite.empty:
+                            filled = True
+                            break
+                if filled: break
+            if filled or interact: break
+        if interact and not filled:
+            lst += line_ls
     return lst
 def valid_tag(tag):
     if not isinstance(tag,str) or "." not in tag:
@@ -1265,8 +1419,8 @@ def simple(message, keys, world, view, viewpoint = "0.0", x = 0, y = 200, size =
                 stop = True
                 break
         disp(world,view,text,viewpoint)
-        view.screen.fill((80,80,80),rect=gm.Rect(view.border, view.border,
-                                                view.rect.width, view.rect.height),special_flags=gm.BLEND_ADD)
+        view.screen.fill((30,30,30),rect=gm.Rect(view.border, view.border,
+                                                view.rect.width, view.rect.height),special_flags=gm.BLEND_SUB)
         view.screen.fill((0,0,0),rect = gm.Rect(view.border,view.border,view.rect.width,view.rect.height/6))
         view.screen.fill((0,0,0),rect = gm.Rect(view.border,view.border + view.rect.height*5/6,
                                                 view.rect.width,view.rect.height/6 + 1))

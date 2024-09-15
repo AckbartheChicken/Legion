@@ -41,8 +41,7 @@ for i in os.listdir("maps"):
 world = lf.WorldData(allsprites,sizes,backs,num = num)
 text = lf.Textdata()
 view.debug = True
-#lf.pause("the world is quiet here you stranger fella",world,view, x = 0, y = 200, size = 20, raw = False)
-#lf.simple("hello my friends this is quite strange i guess. Kind of weird though.",["e"], world, view, size = 20)
+
 #main loop
 def main():
     debug = False
@@ -70,6 +69,7 @@ def main():
             if event.type == gm.KEYDOWN:
                 if event.key == gm.K_k and debug:
                     gm.display.flip()
+                    sleep(0.25)
                 if (event.key == gm.K_SPACE and player.vector.magnitude() != 0 and not player.dodging and
                     not player.ragdoll):
                     player.dodging = 30
